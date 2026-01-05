@@ -1,0 +1,1336 @@
+import React, { useState, useEffect, useRef } from "react";
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import interactionPlugin from "@fullcalendar/interaction";
+
+import "@fullcalendar/core/main.css";
+import "@fullcalendar/daygrid/main.css";
+import "./App.css";
+
+// ---------- small helpers ----------
+const lsGet = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const lsSet = (key, val) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(val));
+  } catch {
+    // ignore
+  }
+};
+
+const formatDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
+};
+
+const formatTime = (t) => (t ? t.slice(0, 5) : "");
+
+// ---------------- MAIN APP ----------------
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(() =>
+    lsGet("sc_loggedInUser", null)
+  );
+  const [page, setPage] = useState(() =>
+    lsGet("sc_loggedInUser", null) ? "dashboard" : "login"
+  );
+
+  const [expenses, setExpenses] = useState(() =>
+    lsGet("sc_expenses", [])
+  );
+  const [tasks, setTasks] = useState(() =>
+    lsGet("sc_tasks", [])
+  );
+  const [events, setEvents] = useState(() =>
+    lsGet("sc_events", [])
+  );
+  const [moods, setMoods] = useState(() =>
+    lsGet("sc_moods", [])
+  );
+  const [diaryEntries, setDiaryEntries] = useState(() =>
+    lsGet("sc_diary", [])
+  );
+
+  const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // persist
+  useEffect(() => lsSet("sc_expenses", expenses), [expenses]);
+  useEffect(() => lsSet("sc_tasks", tasks), [tasks]);
+  useEffect(() => lsSet("sc_events", events), [events]);
+  useEffect(() => lsSet("sc_moods", moods), [moods]);
+  useEffect(() => lsSet("sc_diary", diaryEntries), [diaryEntries]);
+  useEffect(
+    () => lsSet("sc_loggedInUser", currentUser),
+    [currentUser]
+  );
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setPage("login");
+    // keep their data, only clear login
+    localStorage.removeItem("sc_loggedInUser");
+  };
+
+  if (!currentUser && page === "login") {
+    return (
+      <AuthScreen
+        onLogin={(user) => {
+          setCurrentUser(user);
+          setPage("dashboard");
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">Student Companion</div>
+        {[
+          "dashboard",
+          "expenses",
+          "planner",
+          "events",
+          "wellbeing",
+          "diary",
+          "feed",
+          "profile",
+        ].map((p) => (
+          <button
+            key={p}
+            className={
+              "side-item" + (page === p ? " side-item-active" : "")
+            }
+            onClick={() => setPage(p)}
+          >
+            {p.toUpperCase()}
+          </button>
+        ))}
+        <div className="sidebar-flex" />
+        <button className="side-logout" onClick={handleLogout}>
+          LOGOUT
+        </button>
+      </aside>
+
+      <main className="main-panel">
+        <header className="topbar">
+          <h1>{page.toUpperCase()}</h1>
+          {currentUser && (
+            <div className="topbar-user">
+              Logged in as {currentUser.fullName || "Student"}
+            </div>
+          )}
+        </header>
+
+        <section className="page-body">
+          {page === "dashboard" && (
+            <Dashboard
+              expenses={expenses}
+              tasks={tasks}
+              events={events}
+              moods={moods}
+              diaryEntries={diaryEntries}
+            />
+          )}
+
+          {page === "expenses" && (
+            <ExpensesPage
+              expenses={expenses}
+              setExpenses={setExpenses}
+            />
+          )}
+
+          {page === "planner" && (
+            <PlannerPage tasks={tasks} setTasks={setTasks} />
+          )}
+
+          {page === "events" && (
+            <EventsPage
+              events={events}
+              setEvents={setEvents}
+              selectedEvent={selectedEvent}
+              setSelectedEvent={setSelectedEvent}
+            />
+          )}
+
+          {page === "wellbeing" && (
+            <WellbeingPage moods={moods} setMoods={setMoods} />
+          )}
+
+          {page === "diary" && (
+            <DiaryPage
+              entries={diaryEntries}
+              setEntries={setDiaryEntries}
+            />
+          )}
+
+          {page === "feed" && <FeedPage />}
+
+          {page === "profile" && (
+            <ProfilePage currentUser={currentUser} />
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+// ---------------- AUTH SCREEN ----------------
+function AuthScreen({ onLogin }) {
+  const [mode, setMode] = useState("login"); // 'login' | 'register'
+
+  const [studentId, setStudentId] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [pwTouched, setPwTouched] = useState(false);
+
+  const resetFields = () => {
+    setStudentId("");
+    setPassword("");
+    setFullName("");
+    setEmail("");
+    setPhone("");
+    setPwTouched(false);
+  };
+
+  const handleLogin = () => {
+    const students = lsGet("sc_students", []);
+    const user = students.find(
+      (u) => u.studentId === studentId && u.password === password
+    );
+    if (!user) {
+      alert("Invalid credentials or student not found.");
+      return;
+    }
+    alert("Login successful!");
+    onLogin(user);
+  };
+
+  const handleRegister = () => {
+    if (!studentId || !fullName || !email || !phone || !password) {
+      alert("Please fill all fields.");
+      return;
+    }
+    if (password.length < 8) {
+      alert("Password must be at least 8 characters.");
+      return;
+    }
+
+    const students = lsGet("sc_students", []);
+    if (students.some((u) => u.studentId === studentId)) {
+      alert("Student ID already registered.");
+      return;
+    }
+
+    const newUser = {
+      studentId,
+      fullName,
+      email,
+      phone,
+      password,
+    };
+    const updated = [...students, newUser];
+    lsSet("sc_students", updated);
+    alert("Account created successfully. Please login.");
+    setMode("login");
+    resetFields();
+  };
+
+  const isLogin = mode === "login";
+
+  return (
+    <div className="auth-wrap gradient-bg">
+      <div className="auth-card">
+        <h2>{isLogin ? "Login" : "Register"}</h2>
+
+        <label className="auth-label">
+          Student ID
+          <input
+            className="auth-input"
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+          />
+        </label>
+
+        {!isLogin && (
+          <>
+            <label className="auth-label">
+              Full name
+              <input
+                className="auth-input"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+            </label>
+
+            <label className="auth-label">
+              Email
+              <input
+                className="auth-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+              />
+            </label>
+
+            <label className="auth-label">
+              Phone
+              <input
+                className="auth-input"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </label>
+          </>
+        )}
+
+        <label className="auth-label">
+          Password
+          <input
+            className="auth-input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onFocus={() => setPwTouched(true)}
+            onBlur={() => {
+              if (!password) setPwTouched(false);
+            }}
+          />
+        </label>
+        {!isLogin &&
+          pwTouched &&
+          password.length > 0 &&
+          password.length < 8 && (
+            <div className="auth-hint">
+              Password must be at least 8 characters.
+            </div>
+          )}
+
+        <button
+          className="primary-btn auth-main-btn"
+          onClick={isLogin ? handleLogin : handleRegister}
+        >
+          {isLogin ? "Login" : "Create account"}
+        </button>
+
+        <div className="auth-switch">
+          {isLogin ? "Need an account?" : "Already have an account?"}{" "}
+          <button
+            className="link-btn"
+            onClick={() => {
+              setMode(isLogin ? "register" : "login");
+              resetFields();
+            }}
+          >
+            {isLogin ? "Register" : "Login"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- DASHBOARD ----------------
+function Dashboard({ expenses, tasks, events, moods, diaryEntries }) {
+  const totalExpenses = expenses.reduce(
+    (sum, e) => sum + (Number(e.amount) || 0),
+    0
+  );
+
+  const openTasks = tasks.filter((t) => !t.completed).length;
+
+  const upcomingEvents = [...events]
+    .filter((e) => new Date(e.date) >= new Date())
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, 3);
+
+  const lastMood = moods[0];
+  const lastDiary = diaryEntries[0];
+
+  return (
+    <div className="dash-grid">
+      <div className="card">
+        <h3>Total Expenses</h3>
+        <p className="number">£{totalExpenses.toFixed(2)}</p>
+        <p className="muted">Across {expenses.length} entries</p>
+      </div>
+
+      <div className="card">
+        <h3>Planner</h3>
+        <p className="number">{openTasks}</p>
+        <p className="muted">Open tasks remaining</p>
+      </div>
+
+      <div className="card">
+        <h3>Upcoming Events</h3>
+        {upcomingEvents.length === 0 && (
+          <p className="muted">No upcoming events</p>
+        )}
+        {upcomingEvents.map((e) => (
+          <div key={e.id} className="line-item">
+            <span>{formatDate(e.date)}</span>
+            <span>{e.title}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="card">
+        <h3>Wellbeing & Diary</h3>
+        {lastMood ? (
+          <p>
+            Last mood: <strong>{lastMood.mood}</strong> on{" "}
+            {formatDate(lastMood.date)}
+          </p>
+        ) : (
+          <p className="muted">No mood logged yet</p>
+        )}
+        {lastDiary ? (
+          <p>
+            Last journal entry:{" "}
+            <strong>{lastDiary.title || "Untitled"}</strong>
+          </p>
+        ) : (
+          <p className="muted">No journal entries yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- EXPENSES ----------------
+function ExpensesPage({ expenses, setExpenses }) {
+  const [item, setItem] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(formatDate(new Date()));
+
+  const [filterMode, setFilterMode] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const handleAdd = () => {
+    if (!item || !amount || !date) {
+      alert("Please fill item, amount and date.");
+      return;
+    }
+    const newExp = {
+      id: Date.now(),
+      item,
+      amount: Number(amount),
+      date,
+    };
+    setExpenses([newExp, ...expenses]);
+    setItem("");
+    setAmount("");
+    setDate(formatDate(new Date()));
+  };
+
+  const now = new Date();
+  const weekAgo = new Date();
+  weekAgo.setDate(now.getDate() - 7);
+
+  const filtered = expenses.filter((e) => {
+    const d = new Date(e.date);
+    if (Number.isNaN(d.getTime())) return false;
+
+    if (filterMode === "week") {
+      return d >= weekAgo && d <= now;
+    }
+    if (filterMode === "month") {
+      return (
+        d.getMonth() === now.getMonth() &&
+        d.getFullYear() === now.getFullYear()
+      );
+    }
+    if (filterMode === "year") {
+      return d.getFullYear() === now.getFullYear();
+    }
+    if (filterMode === "range") {
+      if (!fromDate || !toDate) return true;
+      const from = new Date(fromDate);
+      const to = new Date(toDate);
+      return d >= from && d <= to;
+    }
+    return true;
+  });
+
+  return (
+    <div className="card">
+      <h3>Expenses</h3>
+
+      <div className="row gap">
+        <input
+          className="input dark"
+          placeholder="Item"
+          value={item}
+          onChange={(e) => setItem(e.target.value)}
+        />
+        <input
+          className="input dark"
+          placeholder="Amount (£)"
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <input
+          className="input dark"
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        <button className="primary-btn" onClick={handleAdd}>
+          Add
+        </button>
+      </div>
+
+      <div className="row gap filter-row">
+        <select
+          className="input dark"
+          value={filterMode}
+          onChange={(e) => setFilterMode(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="week">This week (7 days)</option>
+          <option value="month">This month</option>
+          <option value="year">This year</option>
+          <option value="range">Custom range</option>
+        </select>
+
+        {filterMode === "range" && (
+          <>
+            <input
+              type="date"
+              className="input dark"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
+            <input
+              type="date"
+              className="input dark"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </>
+        )}
+      </div>
+
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Item</th>
+            <th className="right">Amount (£)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 && (
+            <tr>
+              <td colSpan={3} className="muted center">
+                No expenses
+              </td>
+            </tr>
+          )}
+          {filtered.map((e) => (
+            <tr key={e.id}>
+              <td>{formatDate(e.date)}</td>
+              <td>{e.item}</td>
+              <td className="right">£{Number(e.amount).toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------- PLANNER ----------------
+function PlannerPage({ tasks, setTasks }) {
+  const [text, setText] = useState("");
+  const [date, setDate] = useState(formatDate(new Date()));
+  const [time, setTime] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  const handleAdd = () => {
+    if (!text || !date) {
+      alert("Please fill task and date.");
+      return;
+    }
+    const newTask = {
+      id: Date.now(),
+      text,
+      date,
+      time: time || "",
+      completed: false,
+    };
+    setTasks([newTask, ...tasks]);
+    setText("");
+    setTime("");
+    setDate(formatDate(new Date()));
+  };
+
+  const now = new Date();
+  const todayStr = formatDate(now);
+  const weekAhead = new Date();
+  weekAhead.setDate(weekAhead.getDate() + 7);
+
+  const filtered = tasks.filter((t) => {
+    const d = new Date(t.date);
+    if (Number.isNaN(d.getTime())) return false;
+    if (filter === "today") {
+      return t.date === todayStr;
+    }
+    if (filter === "week") {
+      return d >= now && d <= weekAhead;
+    }
+    return true;
+  });
+
+  const toggle = (id) => {
+    setTasks(
+      tasks.map((t) =>
+        t.id === id ? { ...t, completed: !t.completed } : t
+      )
+    );
+  };
+
+  return (
+    <div className="card">
+      <h3>To-do Planner</h3>
+
+      <div className="row gap">
+        <input
+          className="input dark"
+          placeholder="Task description"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <input
+          type="date"
+          className="input dark"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        <input
+          type="time"
+          className="input dark"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+        />
+        <button className="primary-btn" onClick={handleAdd}>
+          Add
+        </button>
+      </div>
+
+      <div className="row gap filter-row">
+        <select
+          className="input dark"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="today">Today</option>
+          <option value="week">Next 7 days</option>
+        </select>
+      </div>
+
+      <ul className="task-list">
+        {filtered.length === 0 && (
+          <li className="muted">No tasks yet</li>
+        )}
+        {filtered.map((t) => (
+          <li key={t.id} className="task-item">
+            <input
+              type="checkbox"
+              checked={t.completed}
+              onChange={() => toggle(t.id)}
+            />
+            <span
+              className={
+                "task-text" + (t.completed ? " task-completed" : "")
+              }
+            >
+              {t.text} — {formatDate(t.date)}
+              {t.time && ` — ${formatTime(t.time)}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ---------------- EVENTS ----------------
+function EventsPage({
+  events,
+  setEvents,
+  selectedEvent,
+  setSelectedEvent,
+}) {
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState(formatDate(new Date()));
+  const [time, setTime] = useState("");
+  const [desc, setDesc] = useState("");
+  const [color, setColor] = useState("blue");
+
+  const calendarRef = useRef(null);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showYearPicker, setShowYearPicker] = useState(false);
+
+  const handleAdd = () => {
+    if (!title || !date) {
+      alert("Please fill event name and date.");
+      return;
+    }
+    const newEv = {
+      id: Date.now(),
+      title,
+      date,
+      time: time || "",
+      description: desc,
+      color,
+    };
+    setEvents([...events, newEv]);
+    setTitle("");
+    setDesc("");
+    setTime("");
+    setDate(formatDate(new Date()));
+    setColor("blue");
+  };
+
+  const toCalendarEvents = events.map((e) => {
+    const start = e.time
+      ? `${e.date}T${e.time}`
+      : `${e.date}T00:00:00`;
+    let colorCode = "#3b82f6";
+    if (e.color === "green") colorCode = "#22c55e";
+    if (e.color === "purple") colorCode = "#a855f7";
+    if (e.color === "orange") colorCode = "#f97316";
+    if (e.color === "pink") colorCode = "#ec4899";
+
+    return {
+      id: String(e.id),
+      title: e.time
+        ? `${formatTime(e.time)} ${e.title}`
+        : e.title,
+      start,
+      backgroundColor: colorCode,
+      borderColor: colorCode,
+      extendedProps: {
+        raw: e,
+        baseColor: colorCode,
+      },
+    };
+  });
+
+  const handleEventClick = (info) => {
+    const raw = info.event.extendedProps.raw;
+    setSelectedEvent(raw);
+  };
+
+  const api = () =>
+    calendarRef.current ? calendarRef.current.getApi() : null;
+
+  const handlePrev = () => {
+    const a = api();
+    if (a) {
+      a.prev();
+      setCurrentDate(a.getDate());
+    }
+  };
+  const handleNext = () => {
+    const a = api();
+    if (a) {
+      a.next();
+      setCurrentDate(a.getDate());
+    }
+  };
+  const handleToday = () => {
+    const a = api();
+    if (a) {
+      a.today();
+      setCurrentDate(a.getDate());
+    }
+  };
+
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  const currentMonthName = monthNames[currentDate.getMonth()];
+  const currentYear = currentDate.getFullYear();
+
+  const gotoMonth = (monthIndex) => {
+    const a = api();
+    if (!a) return;
+    const d = new Date(currentYear, monthIndex, 1);
+    a.gotoDate(d);
+    setCurrentDate(d);
+    setShowMonthPicker(false);
+  };
+
+  const gotoYear = (year) => {
+    const a = api();
+    if (!a) return;
+    const d = new Date(year, currentDate.getMonth(), 1);
+    a.gotoDate(d);
+    setCurrentDate(d);
+    setShowYearPicker(false);
+  };
+
+  const yearsAround = [];
+  for (let y = currentYear - 4; y <= currentYear + 4; y++) {
+    yearsAround.push(y);
+  }
+
+  return (
+    <div className="card">
+      <h3>Calendar & Events</h3>
+
+      {/* custom calendar header */}
+      <div className="cal-header">
+        <button className="secondary-btn" onClick={handleToday}>
+          Today
+        </button>
+
+        <div className="cal-title-wrap">
+          <button
+            className="icon-btn"
+            onClick={handlePrev}
+            aria-label="Previous month"
+          >
+            ‹
+          </button>
+
+          <div className="cal-title">
+            <button
+              className="link-btn cal-month-trigger"
+              onClick={() =>
+                setShowMonthPicker((s) => !s)
+              }
+            >
+              {currentMonthName}
+            </button>
+            <button
+              className="link-btn cal-year-trigger"
+              onClick={() =>
+                setShowYearPicker((s) => !s)
+              }
+            >
+              {currentYear}
+            </button>
+          </div>
+
+          <button
+            className="icon-btn"
+            onClick={handleNext}
+            aria-label="Next month"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      {/* month picker */}
+      {showMonthPicker && (
+        <div className="picker-overlay">
+          <div className="picker-grid">
+            {monthShort.map((m, idx) => (
+              <button
+                key={m}
+                className={
+                  "picker-cell" +
+                  (idx === currentDate.getMonth()
+                    ? " picker-cell-active"
+                    : "")
+                }
+                onClick={() => gotoMonth(idx)}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* year picker */}
+      {showYearPicker && (
+        <div className="picker-overlay">
+          <div className="picker-grid">
+            {yearsAround.map((y) => (
+              <button
+                key={y}
+                className={
+                  "picker-cell" +
+                  (y === currentYear
+                    ? " picker-cell-active"
+                    : "")
+                }
+                onClick={() => gotoYear(y)}
+              >
+                {y}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="calendar-shell">
+        <FullCalendar
+          ref={calendarRef}
+          plugins={[dayGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          headerToolbar={{
+            left: "",
+            center: "",
+            right: "",
+          }}
+          height="auto"
+          events={toCalendarEvents}
+          eventClick={handleEventClick}
+          datesSet={(arg) => {
+            setCurrentDate(arg.start);
+          }}
+        />
+      </div>
+
+      <h4>Add Event</h4>
+      <div className="row gap">
+        <input
+          className="input dark"
+          placeholder="Event name"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <input
+          type="date"
+          className="input dark"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+        <input
+          type="time"
+          className="input dark"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+        />
+      </div>
+      <div className="row gap">
+        <input
+          className="input dark"
+          placeholder="Description (optional)"
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+        />
+        <select
+          className="input dark"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+        >
+          <option value="blue">Blue</option>
+          <option value="green">Green</option>
+          <option value="purple">Purple</option>
+          <option value="orange">Orange</option>
+          <option value="pink">Pink</option>
+        </select>
+        <button className="primary-btn" onClick={handleAdd}>
+          Add
+        </button>
+      </div>
+
+      {selectedEvent && (
+        <EventModal
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// custom tinted popup
+function EventModal({ event, onClose }) {
+  let tint = "rgba(59,130,246,0.12)"; // default blue
+  if (event.color === "green") tint = "rgba(34,197,94,0.12)";
+  if (event.color === "purple") tint = "rgba(168,85,247,0.12)";
+  if (event.color === "orange") tint = "rgba(249,115,22,0.12)";
+  if (event.color === "pink") tint = "rgba(236,72,153,0.12)";
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card" style={{ backgroundColor: tint }}>
+        <h3>{event.title}</h3>
+        <p>
+          <strong>Date:</strong> {formatDate(event.date)}
+        </p>
+        <p>
+          <strong>Time:</strong>{" "}
+          {event.time ? formatTime(event.time) : "Not set"}
+        </p>
+        {event.description && (
+          <p>
+            <strong>Notes:</strong> {event.description}
+          </p>
+        )}
+        <div className="modal-footer">
+          <button className="primary-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- WELLBEING ----------------
+function WellbeingPage({ moods, setMoods }) {
+  const moodOptions = ["Happy", "Neutral", "Sad", "Stressed"];
+  const [selectedMood, setSelectedMood] = useState("Neutral");
+  const [filterMood, setFilterMood] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const suggestions = {
+    Happy: "Keep going! Celebrate your progress today.",
+    Neutral: "Take a small break or a walk.",
+    Sad: "Reach out to a friend or write down your feelings.",
+    Stressed:
+      "Pause for a few deep breaths and stretch your body.",
+  };
+
+  const affirmations = {
+    Happy: "I am exactly where I need to be.",
+    Neutral: "I am present in this moment.",
+    Sad: "It's okay to ask for help.",
+    Stressed: "I create space for calm in my mind.",
+  };
+
+  const handleLog = () => {
+    const now = new Date();
+    const entry = {
+      id: Date.now(),
+      date: now.toISOString(),
+      mood: selectedMood,
+      suggestion: suggestions[selectedMood],
+      affirmation: affirmations[selectedMood],
+    };
+    setMoods([entry, ...moods]);
+  };
+
+  const filtered = moods.filter((m) => {
+    const d = new Date(m.date);
+    if (filterMood !== "all" && m.mood !== filterMood) return false;
+    if (fromDate) {
+      const from = new Date(fromDate);
+      if (d < from) return false;
+    }
+    if (toDate) {
+      const to = new Date(toDate);
+      if (d > to) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div className="card">
+      <h3>Wellbeing / Mood Tracker</h3>
+
+      <div className="row gap">
+        <select
+          className="input dark"
+          value={selectedMood}
+          onChange={(e) => setSelectedMood(e.target.value)}
+        >
+          {moodOptions.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
+        </select>
+        <button className="primary-btn" onClick={handleLog}>
+          Log Mood
+        </button>
+      </div>
+
+      <div className="row gap filter-row">
+        <select
+          className="input dark"
+          value={filterMood}
+          onChange={(e) => setFilterMood(e.target.value)}
+        >
+          <option value="all">All moods</option>
+          {moodOptions.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          className="input dark"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+        <input
+          type="date"
+          className="input dark"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+        />
+      </div>
+
+      <div className="mood-grid">
+        {filtered.length === 0 && (
+          <p className="muted">No mood logs yet.</p>
+        )}
+        {filtered.map((m) => (
+          <div key={m.id} className="mood-card">
+            <div className="mood-date">
+              {formatDate(m.date)}: <strong>{m.mood}</strong>
+            </div>
+            <div>{m.suggestion}</div>
+            <div className="mood-affirm">
+              Daily affirmation: {m.affirmation}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- DIARY ----------------
+function DiaryPage({ entries, setEntries }) {
+  const [title, setTitle] = useState("");
+  const [text, setText] = useState("");
+  const [date, setDate] = useState(formatDate(new Date()));
+  const [filterDate, setFilterDate] = useState("");
+
+  const handleAdd = () => {
+    if (!text) {
+      alert("Please write something.");
+      return;
+    }
+    const entry = {
+      id: Date.now(),
+      date,
+      title,
+      text,
+    };
+    setEntries([entry, ...entries]);
+    setTitle("");
+    setText("");
+    setDate(formatDate(new Date()));
+  };
+
+  const filtered = entries.filter((e) =>
+    filterDate ? e.date === filterDate : true
+  );
+
+  return (
+    <div className="card">
+      <h3>Diary / Journal</h3>
+
+      <div className="row gap">
+        <input
+          className="input dark"
+          placeholder="Title (optional)"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <input
+          type="date"
+          className="input dark"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+        />
+      </div>
+      <textarea
+        className="textarea"
+        placeholder="Write your thoughts..."
+        rows={4}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button className="primary-btn" onClick={handleAdd}>
+        Save entry
+      </button>
+
+      <div className="row gap filter-row">
+        <input
+          type="date"
+          className="input dark"
+          value={filterDate}
+          onChange={(e) => setFilterDate(e.target.value)}
+        />
+        <button
+          className="secondary-btn"
+          onClick={() => setFilterDate("")}
+        >
+          Clear filter
+        </button>
+      </div>
+
+      <div className="diary-list">
+        {filtered.length === 0 && (
+          <p className="muted">No entries yet.</p>
+        )}
+        {filtered.map((e) => (
+          <div key={e.id} className="diary-card">
+            <div className="diary-head">
+              <strong>{e.title || "Untitled"}</strong>
+              <span>{formatDate(e.date)}</span>
+            </div>
+            <p>{e.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- FEED ----------------
+function FeedPage() {
+  const cards = [
+    {
+      title: "Amber Student",
+      url: "https://amberstudent.com/places/search/united-kingdom-1811011902157",
+      desc: "Search student accommodation across the UK.",
+    },
+    {
+      title: "SpareRoom",
+      url: "https://share.google/bGwPZwarZT9w6vQqO",
+      desc: "Rooms and flatshares with other tenants.",
+    },
+    {
+      title: "UniAcco",
+      url: "https://uniacco.com/get-expert-help?utm_source=google&utm_medium=cpc&utm_campaign=src-brand-geo-all&utm_content=brand-exact&utm_term=uniacco",
+      desc: "Compare and book student housing with help.",
+    },
+    {
+      title: "Accommodation for Students",
+      url: "https://share.google/assOT3ltd8G1yU6PZ",
+      desc: "Listings tailored for students in different cities.",
+    },
+  ];
+
+  return (
+    <div className="card">
+      <h3>Accommodation Links</h3>
+      <div className="feed-grid">
+        {cards.map((c) => (
+          <a
+            key={c.title}
+            className="feed-card"
+            href={c.url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <h4>{c.title}</h4>
+            <p>{c.desc}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- PROFILE ----------------
+function ProfilePage({ currentUser }) {
+  const [photoUrl, setPhotoUrl] = useState(() => {
+    if (!currentUser) return "";
+    return lsGet(
+      `sc_profilePhoto_${currentUser.studentId}`,
+      ""
+    );
+  });
+
+  useEffect(() => {
+    if (!currentUser) return;
+    lsSet(`sc_profilePhoto_${currentUser.studentId}`, photoUrl);
+  }, [photoUrl, currentUser]);
+
+  if (!currentUser) {
+    return (
+      <div className="card">
+        <p>No user information.</p>
+      </div>
+    );
+  }
+
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setPhotoUrl(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="card">
+      <h3>Profile</h3>
+      <div className="profile-grid">
+        <div>
+          <p>
+            <strong>Student ID:</strong> {currentUser.studentId}
+          </p>
+          <p>
+            <strong>Name:</strong> {currentUser.fullName}
+          </p>
+          <p>
+            <strong>Email:</strong> {currentUser.email}
+          </p>
+          <p>
+            <strong>Phone:</strong> {currentUser.phone}
+          </p>
+          <p>
+            <strong>Password:</strong> ******** (hidden)
+          </p>
+        </div>
+        <div className="profile-photo">
+          {photoUrl ? (
+            <img
+              src={photoUrl}
+              alt="Profile"
+              className="profile-img"
+            />
+          ) : (
+            <div className="profile-img placeholder">
+              No photo
+            </div>
+          )}
+          <label className="secondary-btn upload-btn">
+            Upload photo
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoChange}
+              style={{ display: "none" }}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
