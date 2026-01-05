@@ -8,8 +8,7 @@ Database: MongoDB
 Containerization: Docker
 Deployment: Render
 
-Architecture
-This application consists of:
+Architecture of this application consists of the following:
 - Frontend
 - Auth Service (Microservice for User authentication)
 - Profile Service(Microservice for User profile management)
